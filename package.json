@@ -1,0 +1,36 @@
+{
+  "name": "polymarket-btc-bot",
+  "version": "1.0.0",
+  "description": "BTC 5-minute automated market maker for Polymarket",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "TS_NODE_PROJECT=tsconfig.json ts-node src/index.ts",
+    "demo": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/test-runner.ts",
+    "dashboard": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/dashboard-runner.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test:demo": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/test-runner.ts"
+  },
+  "keywords": [
+    "polymarket",
+    "trading",
+    "market-maker",
+    "crypto"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@polymarket/clob-client": "^0.5.0",
+    "@types/ws": "^8.5.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.7.0",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1",
+    "esbuild": "^0.19.0"
+  }
+}
