@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -220,6 +221,7 @@
     }
 
     @media (max-width: 980px) {
+
       .chart-card,
       .side-card,
       .full {
@@ -239,12 +241,14 @@
     }
   </style>
 </head>
+
 <body>
   <div class="shell">
     <section class="hero">
       <div>
         <h1>BTC 5-Minute Demo Desk</h1>
-        <p>Live view of the long-running Polymarket BTC demo bot with projected profit, trade cadence, fills, active orders, and a rolling event tape.</p>
+        <p>Live view of the long-running Polymarket BTC demo bot with projected profit, trade cadence, fills, active
+          orders, and a rolling event tape.</p>
       </div>
       <div class="status-pill">
         <span class="status-dot"></span>
@@ -254,9 +258,9 @@
 
     <section class="grid">
       <div class="card metric-card" style="grid-column: span 3;">
-        <h2>Total Profit</h2>
-        <div class="metric-value profit" id="total-profit">$0.0000</div>
-        <div class="metric-sub" id="profit-hour">$0.0000/hr</div>
+        <h2>Total Balance</h2>
+        <div class="metric-value profit" id="total-profit">$500</div>
+        <div class="metric-sub" id="profit-hour">+$0.0000 profit</div>
       </div>
 
       <div class="card metric-card" style="grid-column: span 3;">
@@ -394,7 +398,7 @@
       return `${hours}h ${minutes}m ${remSeconds}s`;
     };
 
-    function renderChart(series) {
+    function renderChart(series, capital) {
       const line = document.getElementById('chart-line');
       const area = document.getElementById('chart-area');
 
@@ -406,14 +410,20 @@
 
       const width = 720;
       const height = 230;
-      const values = series.map((point) => point.total_profit);
-      const min = Math.min(...values, 0);
-      const max = Math.max(...values, 0.001);
+      const values = series.map((point) => point.balance || (capital + point.total_profit));
+      const min = Math.min(...values, capital);
+      const max = Math.max(...values, capital + 0.001);
       const span = max - min || 1;
+      
+      const startTime = series[0].timestamp;
+      const endTime = series[series.length - 1].timestamp;
+      // Minimum span of 1 minute on x-axis so it doesn't stretch wildly at start
+      const timeSpan = Math.max(endTime - startTime, 60000);
 
-      const points = series.map((point, index) => {
-        const x = (index / Math.max(series.length - 1, 1)) * width;
-        const y = height - ((point.total_profit - min) / span) * (height - 20) - 10;
+      const points = series.map((point) => {
+        const balance = point.balance || (capital + point.total_profit);
+        const x = ((point.timestamp - startTime) / timeSpan) * width;
+        const y = height - ((balance - min) / span) * (height - 20) - 10;
         return [x, y];
       });
 
@@ -479,8 +489,8 @@
         const data = await response.json();
 
         document.getElementById('status-text').textContent = `Live · updated ${shortTime(data.last_updated_at)}`;
-        document.getElementById('total-profit').textContent = money(data.total_profit);
-        document.getElementById('profit-hour').textContent = `${money(data.profit_per_hour)}/hr`;
+        document.getElementById('total-profit').textContent = money(data.balance);
+        document.getElementById('profit-hour').textContent = `Profit: ${money(data.total_profit)} · ${money(data.profit_per_hour)}/hr`;
         document.getElementById('realized-pnl').textContent = money(data.realized_pnl);
         document.getElementById('gross-profit-loss').textContent = `${money(data.gross_profit)} gross win / ${money(data.gross_loss)} gross loss · PF ${Number(data.profit_factor).toFixed(2)}`;
         document.getElementById('day-profit').textContent = money(data.projected_day_profit);
@@ -510,7 +520,7 @@
         document.getElementById('profit-factor').textContent = Number(data.profit_factor).toFixed(2);
         document.getElementById('cycles').textContent = integer(data.cycles);
 
-        renderChart(data.profit_series || []);
+        renderChart(data.profit_series || [], data.capital || 0);
         renderTrades(data.recent_trades || []);
         renderEvents(data.recent_events || []);
       } catch (error) {
@@ -522,4 +532,5 @@
     setInterval(refresh, 1000);
   </script>
 </body>
+
 </html>

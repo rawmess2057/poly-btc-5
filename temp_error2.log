@@ -1,0 +1,24 @@
+
+> polymarket-btc-bot@1.0.0 dashboard
+> TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/dashboard-runner.ts
+
+/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:859
+    return new TSError(diagnosticText, diagnosticCodes, diagnostics);
+           ^
+TSError: ⨯ Unable to compile TypeScript:
+src/binance-oracle.ts(1,23): error TS7016: Could not find a declaration file for module 'ws'. '/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ws/wrapper.mjs' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/ws` if it exists or add a new declaration (.d.ts) file containing `declare module 'ws';`
+src/binance-oracle.ts(55,26): error TS7006: Parameter 'err' implicitly has an 'any' type.
+
+    at createTSError (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:859:12)
+    at reportTSError (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:863:19)
+    at getOutput (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1077:36)
+    at Object.compile (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1433:41)
+    at Module.m._compile (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1617:30)
+    at node:internal/modules/cjs/loader:1893:10
+    at Object.require.extensions.<computed> [as .ts] (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1480:32)
+    at Module._load (node:internal/modules/cjs/loader:1299:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14) {
+  diagnosticCodes: [ 7016, 7006 ]
+}

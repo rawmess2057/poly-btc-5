@@ -1,0 +1,26 @@
+
+> polymarket-btc-bot@1.0.0 dashboard
+> TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/dashboard-runner.ts
+
+/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:859
+    return new TSError(diagnosticText, diagnosticCodes, diagnostics);
+           ^
+TSError: ⨯ Unable to compile TypeScript:
+src/btc-bot.ts(2,23): error TS2459: Module '"./order-placer"' declares 'ActiveOrder' locally, but it is not exported.
+src/btc-bot.ts(2,36): error TS2459: Module '"./order-placer"' declares 'OrderExecutor' locally, but it is not exported.
+src/btc-bot.ts(6,10): error TS2303: Circular definition of import alias 'ActiveOrder'.
+src/btc-bot.ts(6,23): error TS2303: Circular definition of import alias 'OrderExecutor'.
+src/btc-bot.ts(182,14): error TS2339: Property 'panicCancel' does not exist on type 'BTC5MinBot'.
+
+    at createTSError (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:859:12)
+    at reportTSError (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:863:19)
+    at getOutput (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1077:36)
+    at Object.compile (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1433:41)
+    at Module.m._compile (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1617:30)
+    at node:internal/modules/cjs/loader:1893:10
+    at Object.require.extensions.<computed> [as .ts] (/home/raw/Desktop/New Folder/poly-btc-5/node_modules/ts-node/src/index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1480:32)
+    at Module._load (node:internal/modules/cjs/loader:1299:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14) {
+  diagnosticCodes: [ 2459, 2459, 2303, 2303, 2339 ]
+}

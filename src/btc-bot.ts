@@ -1,5 +1,27 @@
 import { MarketListener } from './market-listener';
 import { OrderPlacer } from './order-placer';
+import { BinanceOracle } from './binance-oracle';
+import axios from 'axios';
+
+export interface ActiveOrder {
+  order_id: string;
+  side: 'BUY' | 'SELL';
+  price: number;
+  size: number;
+  timestamp: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELLED';
+}
+
+export interface OrderExecutor {
+  placeBothSides(
+    mid_price: number,
+    spread_bps: number,
+    size: number
+  ): Promise<{ buy_order_id?: string; sell_order_id?: string }>;
+  cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
+  cancelOrder(order_id: string): Promise<boolean>;
+  getActiveOrders(): ActiveOrder[];
+}
 
 interface BotState {
   cycle: number;
@@ -7,6 +29,7 @@ interface BotState {
   last_order_ids: string[];
   in_critical_window: boolean;
   cycle_start_time: number;
+  timeOffsetMs: number;
 }
 
 export interface BotCycleReport {
@@ -18,6 +41,7 @@ export interface BotCycleReport {
   active_orders: number;
   in_critical_window: boolean;
   total_profit: number;
+  capital: number;
   edge_detected: boolean;
   risk_free_profit: number;
   entered_trade: boolean;
@@ -43,35 +67,18 @@ export interface MarketDataSource {
   close(): void;
 }
 
-export interface ActiveOrder {
-  order_id: string;
-  side: 'BUY' | 'SELL';
-  price: number;
-  size: number;
-  timestamp: number;
-  status: 'PENDING' | 'FILLED' | 'CANCELLED';
-}
-
-export interface OrderExecutor {
-  placeBothSides(
-    mid_price: number,
-    spread_bps: number,
-    size: number
-  ): Promise<{ buy_order_id?: string; sell_order_id?: string }>;
-  cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
-  getActiveOrders(): ActiveOrder[];
-}
-
-interface BotDependencies {
+export interface BotDependencies {
   listener?: MarketDataSource;
   placer?: OrderExecutor;
   secondsIntoCandle?: () => number;
   onCycle?: (report: BotCycleReport) => void;
+  onEvent?: (level: 'info' | 'trade' | 'fill' | 'cancel' | 'warn', message: string) => void;
 }
 
 export class BTC5MinBot {
   private listener: MarketDataSource;
   private placer: OrderExecutor;
+  private options: BotDependencies;
   private secondsIntoCandleProvider?: () => number;
   private onCycle?: (report: BotCycleReport) => void;
   private state: BotState = {
@@ -79,12 +86,13 @@ export class BTC5MinBot {
     total_profit: 0,
     last_order_ids: [],
     in_critical_window: false,
-    cycle_start_time: Date.now()
+    cycle_start_time: Date.now(),
+    timeOffsetMs: 0
   };
 
   private config = {
     market_id: '', // Set in constructor
-    capital_usdc: parseFloat(process.env.INITIAL_CAPITAL_USDC || '100'),
+    capital_usdc: parseFloat(process.env.INITIAL_CAPITAL_USDC || '500'),
     spread_bps: parseFloat(process.env.SPREAD_BPS || '20'),
     spread_bps_medium_edge: parseFloat(process.env.SPREAD_BPS_MEDIUM_EDGE || '24'),
     spread_bps_high_edge: parseFloat(process.env.SPREAD_BPS_HIGH_EDGE || '30'),
@@ -96,8 +104,13 @@ export class BTC5MinBot {
     min_edge_to_trade: parseFloat(process.env.MIN_EDGE_TO_TRADE || '0.03'),
     medium_edge_threshold: parseFloat(process.env.MEDIUM_EDGE_THRESHOLD || '0.05'),
     high_edge_threshold: parseFloat(process.env.HIGH_EDGE_THRESHOLD || '0.07'),
+    maker_rebate_bps: parseFloat(process.env.MAKER_REBATE_BPS || '0'),
+    max_daily_drawdown_pct: parseFloat(process.env.MAX_DAILY_DRAWDOWN_PCT || '8'),
     polling_interval_ms: 500
   };
+
+  private isRunning = false;
+  private oracle?: BinanceOracle;
 
   private selectTradeParameters(riskFreeProfit: number) {
     if (riskFreeProfit >= this.config.high_edge_threshold) {
@@ -125,6 +138,7 @@ export class BTC5MinBot {
 
   constructor(market_id: string, private_key: string, deps: BotDependencies = {}) {
     this.config.market_id = market_id;
+    this.options = deps;
     this.listener = deps.listener ?? new MarketListener(market_id, process.env.WS_URL!);
     this.placer = deps.placer ?? new OrderPlacer(market_id, private_key);
     this.secondsIntoCandleProvider = deps.secondsIntoCandle;
@@ -140,20 +154,55 @@ export class BTC5MinBot {
       return this.secondsIntoCandleProvider();
     }
 
-    const now = new Date();
+    const now = new Date(Date.now() + this.state.timeOffsetMs);
+    const minutes = now.getMinutes();
     const seconds = now.getSeconds();
     const milliseconds = now.getMilliseconds();
-    
-    // If we're at :04:500, we're 4.5 seconds into the candle
-    const total_seconds = seconds + (milliseconds / 1000);
-    
+
+    const minutesIntoCandle = minutes % 5;
+    const total_seconds = (minutesIntoCandle * 60) + seconds + (milliseconds / 1000);
+
     return total_seconds;
+  }
+
+  private async syncClock() {
+    try {
+      const start = Date.now();
+      // Fetch precise time from a public time API
+      const res = await axios.get('http://worldtimeapi.org/api/timezone/Etc/UTC', { timeout: 5000 });
+      const end = Date.now();
+
+      const serverTime = new Date(res.data.utc_datetime).getTime();
+      const networkLatency = (end - start) / 2;
+
+      this.state.timeOffsetMs = (serverTime + networkLatency) - end;
+      console.log(`⏱️ Clock synced successfully. Local offset is ${this.state.timeOffsetMs}ms`);
+    } catch (e: any) {
+      console.warn(`⚠️ Could not sync clock. Using local time. Error: ${e.message}`);
+    }
   }
 
   /**
    * Main loop: Check for edges and execute
    */
   async start() {
+    await this.syncClock();
+
+    // Resync every hour
+    setInterval(() => this.syncClock(), 60 * 60 * 1000);
+
+    const strikePrice = parseFloat(process.env.STRIKE_PRICE || '0');
+    if (strikePrice > 0) {
+      this.oracle = new BinanceOracle(strikePrice, (price, direction) => {
+        const msg = `🚨 ORACLE PANIC CANCEL: BTC crossed ${direction} through strike $${strikePrice.toLocaleString()} at $${price.toLocaleString()}`;
+        console.error(msg);
+        this.options.onEvent?.('warn', msg);
+        this.panicCancel(msg);
+      });
+      this.oracle.start();
+    }
+
+    this.isRunning = true;
     console.log('🚀 BTC 5-Minute Bot starting...');
     console.log(`   Market ID: ${this.config.market_id}`);
     console.log(`   Capital: $${this.config.capital_usdc}`);
@@ -185,7 +234,44 @@ export class BTC5MinBot {
     this.listener.close();
   }
 
+  private async panicCancel(reason: string) {
+    const active = this.placer.getActiveOrders();
+    let cancelledCount = 0;
+    for (const order of active) {
+      if (order.status === 'PENDING') {
+        const success = await this.placer.cancelOrder(order.order_id);
+        if (success) cancelledCount++;
+      }
+    }
+    if (cancelledCount > 0) {
+      const msg = `✅ Panic cancelled ${cancelledCount} orders due to: ${reason}`;
+      console.log(msg);
+      this.options.onEvent?.('cancel', msg);
+    }
+    // Pause trading for the rest of this candle to be safe
+    this.state.in_critical_window = false;
+  }
+
   private async cycle() {
+    // ========== DRAWDOWN CHECK ==========
+    const max_loss_amount = this.config.capital_usdc * (this.config.max_daily_drawdown_pct / 100);
+    if (this.state.total_profit <= -max_loss_amount) {
+      console.error(`\n🚨 FATAL: Max daily drawdown of ${this.config.max_daily_drawdown_pct}% ($${max_loss_amount.toFixed(2)}) reached!`);
+      console.error(`🚨 Current PnL: $${this.state.total_profit.toFixed(2)}`);
+      console.error(`🚨 Cancelling all active orders and shutting down to protect capital.`);
+      
+      const active = this.placer.getActiveOrders();
+      for (const order of active) {
+        if (order.status === 'PENDING') {
+          await this.placer.cancelOrder(order.order_id);
+        }
+      }
+      
+      this.listener.close();
+      console.log('🛑 Bot stopped.');
+      process.exit(1);
+    }
+
     const snapshot = this.listener.getSnapshot();
     const seconds_in_candle = this.getSecondsIntoCandle();
     let enteredTrade = false;
@@ -194,9 +280,9 @@ export class BTC5MinBot {
     let selectedOrderSize = 0;
     let selectedSpreadBps = 0;
     this.state.last_order_ids = [];
-    
+
     // Check if we're in the critical T-10s window
-    const is_critical = 
+    const is_critical =
       seconds_in_candle >= this.config.target_window_start &&
       seconds_in_candle <= this.config.target_window_end;
 
@@ -230,15 +316,15 @@ export class BTC5MinBot {
 
     // ========== MAKER ORDER MANAGEMENT ==========
     const active = this.placer.getActiveOrders();
-    
+
     if (active.length > 0 && is_critical) {
       // In critical window: check if we need to rebalance
       const bid_price = snapshot.best_bid.price;
       const ask_price = snapshot.best_ask.price;
-      
+
       // If market moved significantly, cancel and replace
       const spread_moved = Math.abs(snapshot.mid_price - (bid_price + ask_price) / 2) > 0.01;
-      
+
       if (spread_moved && active.length > 0) {
         console.log(`\n⚡ Market moved! Rebalancing orders...`);
         for (const order of active) {
@@ -272,6 +358,7 @@ export class BTC5MinBot {
       active_orders: active.length,
       in_critical_window: is_critical,
       total_profit: this.state.total_profit,
+      capital: this.config.capital_usdc,
       edge_detected: edgeDetected,
       risk_free_profit: riskFreeProfit,
       entered_trade: enteredTrade,
@@ -294,14 +381,14 @@ export class BTC5MinBot {
     );
 
     this.state.last_order_ids = [result.buy_order_id, result.sell_order_id].filter(Boolean) as string[];
-    
+
     // Estimate profit if both fill
     const spread_profit = (spreadBps / 10000) * orderSize * 2 * snapshot.mid_price;
-    const rebate_profit = (0.001 * orderSize * 2 * snapshot.mid_price); // 0.1% rebate
-    
+    const rebate_profit = (this.config.maker_rebate_bps / 10000) * orderSize * 2 * snapshot.mid_price;
+
     const cycle_profit = spread_profit + rebate_profit;
     this.state.total_profit += cycle_profit;
-    
+
     console.log(`   Estimated cycle profit: $${cycle_profit.toFixed(4)}`);
     return cycle_profit;
   }

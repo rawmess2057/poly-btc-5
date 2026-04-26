@@ -131,7 +131,7 @@ export class OrderPlacer implements OrderExecutor {
           price,
           side: side === 'BUY' ? Side.BUY : Side.SELL,
           size,
-          feeRateBps: 0,
+          feeRateBps: parseInt(process.env.FEE_RATE_BPS || '0', 10),
           expiration: Math.floor(Date.now() / 1000) + timeout_seconds
         },
         {
@@ -189,6 +189,28 @@ export class OrderPlacer implements OrderExecutor {
       return !!new_id;
     } catch (err) {
       console.error('Cancel/replace failed:', err);
+      return false;
+    }
+  }
+
+  async cancelOrder(order_id: string): Promise<boolean> {
+    try {
+      const existing = this.active_orders.get(order_id);
+      if (!existing) {
+        return false;
+      }
+
+      if (this.demoMode) {
+        this.active_orders.delete(order_id);
+      } else {
+        const client = await this.getClient();
+        await client?.cancelOrder({ orderID: order_id });
+        this.active_orders.delete(order_id);
+      }
+      console.log(`✅ Cancelled order: ${order_id}`);
+      return true;
+    } catch (err) {
+      console.error(`Failed to cancel order ${order_id}:`, err);
       return false;
     }
   }

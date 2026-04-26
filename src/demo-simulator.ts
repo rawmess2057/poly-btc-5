@@ -99,6 +99,25 @@ class DemoOrderPlacer implements OrderExecutor {
     return true;
   }
 
+  async cancelOrder(order_id: string): Promise<boolean> {
+    this.settleExpiredTrades();
+    const existing = this.activeOrders.get(order_id);
+    if (!existing) {
+      return false;
+    }
+
+    this.activeOrders.delete(order_id);
+    this.metrics.recordSettlement({
+      order_id: existing.order_id,
+      side: existing.side,
+      price: existing.price,
+      size: existing.size,
+      status: 'CANCELLED'
+    });
+    console.log(`✅ Demo cancelled order: ${order_id}`);
+    return true;
+  }
+
   getActiveOrders(): ActiveOrder[] {
     this.settleExpiredTrades();
     return Array.from(this.activeOrders.values());
@@ -136,7 +155,7 @@ class DemoOrderPlacer implements OrderExecutor {
 
       if (roll < 0.58) {
         outcome = 'WON';
-        realizedPnl = trade.expected_profit * (0.75 + Math.random() * 0.55);
+        realizedPnl = trade.expected_profit * (1.8 + Math.random() * 1.2);
         buyStatus = 'FILLED';
         sellStatus = 'FILLED';
       } else if (roll < 0.82) {
@@ -190,7 +209,7 @@ export function createDemoBot(metrics: DashboardMetricsStore): BTC5MinBot {
       listener: new DemoMarketListener(),
       placer: new DemoOrderPlacer(metrics),
       secondsIntoCandle: (() => {
-        const sequence = [12, 28, 34, 41, 48, 55, 18, 31, 38, 44, 52, 16];
+        const sequence = [230, 245, 256, 265, 275, 285, 290, 296, 5, 45, 120, 180];
         let index = 0;
 
         return () => {

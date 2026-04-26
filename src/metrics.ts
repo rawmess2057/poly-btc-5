@@ -22,6 +22,7 @@ export interface ProfitPoint {
   timestamp: number;
   total_profit: number;
   cycle: number;
+  balance: number;
 }
 
 export interface OrderSettlement {
@@ -63,6 +64,7 @@ export class DashboardMetricsStore {
   private cancels = 0;
   private replacements = 0;
   private totalProfit = 0;
+  private capital = 0;
   private realizedPnl = 0;
   private wonTrades = 0;
   private lostTrades = 0;
@@ -84,6 +86,7 @@ export class DashboardMetricsStore {
     this.lastUpdatedAt = report.timestamp;
     this.cycles = report.cycle + 1;
     this.totalProfit = report.total_profit;
+    this.capital = report.capital;
     this.lastMidPrice = report.mid_price;
     this.lastRiskFreeProfit = report.risk_free_profit;
     this.activeOrders = report.active_orders;
@@ -138,12 +141,23 @@ export class DashboardMetricsStore {
       this.pushEvent('trade', `Entered paired trade at $${report.mid_price.toFixed(4)} for est. $${report.estimated_cycle_profit.toFixed(4)}`);
     }
 
-    this.profitSeries.push({
-      timestamp: report.timestamp,
-      total_profit: report.total_profit,
-      cycle: report.cycle
-    });
-    this.profitSeries = this.profitSeries.slice(-120);
+    const lastPoint = this.profitSeries[this.profitSeries.length - 1];
+    const shouldPush = !lastPoint || 
+                       (report.total_profit !== lastPoint.total_profit) || 
+                       (report.timestamp - lastPoint.timestamp >= 15000);
+
+    if (shouldPush) {
+      this.profitSeries.push({
+        timestamp: report.timestamp,
+        total_profit: report.total_profit,
+        cycle: report.cycle,
+        balance: this.capital + report.total_profit
+      });
+      
+      if (this.profitSeries.length > 5000) {
+        this.profitSeries.shift();
+      }
+    }
   }
 
   recordSettlement(settlement: OrderSettlement) {
@@ -235,6 +249,8 @@ export class DashboardMetricsStore {
       cancels: this.cancels,
       replacements: this.replacements,
       total_profit: Number(this.totalProfit.toFixed(4)),
+      capital: Number(this.capital.toFixed(4)),
+      balance: Number((this.capital + this.totalProfit).toFixed(4)),
       realized_pnl: Number(this.realizedPnl.toFixed(4)),
       expected_value_open: Number(openExpectedValue.toFixed(4)),
       won_trades: this.wonTrades,
@@ -260,10 +276,10 @@ export class DashboardMetricsStore {
     };
   }
 
-  private pushEvent(level: DashboardEvent['level'], message: string) {
+  pushEvent(level: DashboardEvent['level'] | 'warn', message: string) {
     this.recentEvents.unshift({
       timestamp: Date.now(),
-      level,
+      level: level === 'warn' ? 'cancel' : level, // Map warn to cancel for UI
       message
     });
     this.recentEvents = this.recentEvents.slice(0, 30);
