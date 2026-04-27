@@ -3,6 +3,8 @@ import { OrderPlacer } from './order-placer';
 import { BinanceOracle } from './binance-oracle';
 import axios from 'axios';
 
+import { CompoundingManager } from './compounding-manager';
+
 export interface ActiveOrder {
   order_id: string;
   side: 'BUY' | 'SELL';
@@ -90,6 +92,10 @@ export class BTC5MinBot {
     timeOffsetMs: 0
   };
 
+  // ===== COMPOUNDING INTEGRATION =====
+  private compoundingManager: CompoundingManager;
+  private lastDailyResetTime: number = Date.now();
+
   private config = {
     market_id: '', // Set in constructor
     capital_usdc: parseFloat(process.env.INITIAL_CAPITAL_USDC || '500'),
@@ -143,6 +149,15 @@ export class BTC5MinBot {
     this.placer = deps.placer ?? new OrderPlacer(market_id, private_key);
     this.secondsIntoCandleProvider = deps.secondsIntoCandle;
     this.onCycle = deps.onCycle;
+
+    // ===== INITIALIZE COMPOUNDING =====
+    this.compoundingManager = new CompoundingManager(this.config.capital_usdc);
+    console.log('💰 Compounding manager initialized');
+    if (process.env.COMPOUNDING_ENABLED === 'true') {
+      console.log(`   Strategy: ${process.env.COMPOUNDING_STRATEGY || 'tiered'}`);
+      console.log(`   Tier 1 target: $${process.env.TIER1_CAPITAL_TARGET || '5000'}`);
+      console.log(`   Tier 2 target: $${process.env.TIER2_CAPITAL_TARGET || '25000'}`);
+    }
   }
 
   /**
@@ -183,6 +198,80 @@ export class BTC5MinBot {
   }
 
   /**
+   * Process profit with compounding
+   * Call after each cycle to apply compounding logic
+   */
+  private processCompoundingCycle(cycleProfit: number): {
+    reinvested: number;
+    withdrawn: number;
+    newCapital: number;
+    rebalanceNeeded: boolean;
+    circuitBreakerTriggered: boolean;
+  } {
+    const result = this.compoundingManager.processTrade(cycleProfit);
+
+    // Log withdrawals
+    if (result.withdrawn > 0) {
+      console.log(`💰 Withdrawn: $${result.withdrawn.toFixed(2)}`);
+    }
+
+    // Handle circuit breaker
+    if (result.circuitBreakerTriggered) {
+      console.error('🛑 CIRCUIT BREAKER: Daily loss threshold exceeded. STOPPING TRADING.');
+      return result;
+    }
+
+    // Update order size if capital changed significantly
+    if (result.rebalanceNeeded) {
+      const oldOrderSize = this.config.order_size;
+      const newOrderSize = this.compoundingManager.getOrderSize(
+        parseFloat(process.env.BASE_ORDER_SIZE || '10')
+      );
+
+      if (newOrderSize !== oldOrderSize) {
+        console.log(`🔄 Rebalancing order size: ${oldOrderSize} → ${newOrderSize} contracts`);
+        this.config.order_size = newOrderSize;
+        
+        // Also scale medium/high edge order sizes proportionally
+        const scaleFactor = newOrderSize / oldOrderSize;
+        this.config.order_size_medium_edge *= scaleFactor;
+        this.config.order_size_high_edge *= scaleFactor;
+      }
+    }
+
+    // Update capital in config
+    this.config.capital_usdc = result.newCapital;
+
+    return result;
+  }
+
+  /**
+   * Reset daily metrics and print report (call at midnight)
+   */
+  private resetDailyMetrics(): void {
+    const stats = this.compoundingManager.getDailyStats();
+    console.log(`
+╔════════════════════════════════════════╗
+║        DAILY RESET & COMPOUNDING       ║
+╚════════════════════════════════════════╝
+Daily Profit:  $${stats.dailyProfit.toFixed(2)}
+Daily Return:  ${stats.dailyReturn.toFixed(2)}%
+Capital:       $${stats.capital.toFixed(2)}
+Tier:          ${stats.tier}
+Total Withdrawn: $${stats.withdrawn.toFixed(2)}
+    `);
+
+    this.compoundingManager.resetDaily();
+  }
+
+  /**
+   * Print full compounding report
+   */
+  printCompoundingReport(): void {
+    console.log(this.compoundingManager.getReport());
+  }
+
+  /**
    * Main loop: Check for edges and execute
    */
   async start() {
@@ -190,6 +279,19 @@ export class BTC5MinBot {
 
     // Resync every hour
     setInterval(() => this.syncClock(), 60 * 60 * 1000);
+
+    // Daily reset at midnight
+    setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 0 && now.getMinutes() === 0) {
+        // Make sure we only run once per day
+        const daysSinceLastReset = (Date.now() - this.lastDailyResetTime) / (1000 * 60 * 60 * 24);
+        if (daysSinceLastReset > 0.99) {
+          this.resetDailyMetrics();
+          this.lastDailyResetTime = Date.now();
+        }
+      }
+    }, 60000); // Check every minute
 
     const strikePrice = parseFloat(process.env.STRIKE_PRICE || '0');
     if (strikePrice > 0) {
@@ -207,7 +309,8 @@ export class BTC5MinBot {
     console.log(`   Market ID: ${this.config.market_id}`);
     console.log(`   Capital: $${this.config.capital_usdc}`);
     console.log(`   Spread: ${this.config.spread_bps} bps`);
-    console.log(`   Critical window: ${this.config.target_window_start}s - ${this.config.target_window_end}s\n`);
+    console.log(`   Critical window: ${this.config.target_window_start}s - ${this.config.target_window_end}s`);
+    console.log(`   Compounding: ${process.env.COMPOUNDING_ENABLED === 'true' ? '✅ ENABLED' : '❌ DISABLED'}\n`);
 
     // Main loop
     const interval = setInterval(() => this.cycle(), this.config.polling_interval_ms);
@@ -217,6 +320,7 @@ export class BTC5MinBot {
       console.log('\n\n🛑 Shutting down gracefully...');
       clearInterval(interval);
       this.listener.close();
+      this.printCompoundingReport();
       process.exit(0);
     });
   }
@@ -232,6 +336,8 @@ export class BTC5MinBot {
 
     clearInterval(interval);
     this.listener.close();
+    console.log('\n--- Running compounding report ---');
+    this.printCompoundingReport();
   }
 
   private async panicCancel(reason: string) {
@@ -268,6 +374,7 @@ export class BTC5MinBot {
       }
       
       this.listener.close();
+      this.printCompoundingReport();
       console.log('🛑 Bot stopped.');
       process.exit(1);
     }
@@ -308,6 +415,21 @@ export class BTC5MinBot {
           console.log(`   Size: ${selectedOrderSize} | Spread: ${selectedSpreadBps} bps`);
           estimatedCycleProfit = await this.enterTrade(snapshot, selectedSpreadBps, selectedOrderSize);
           enteredTrade = estimatedCycleProfit > 0;
+
+          // ===== PROCESS COMPOUNDING =====
+          if (estimatedCycleProfit > 0) {
+            const compoundingResult = this.processCompoundingCycle(estimatedCycleProfit);
+            
+            if (compoundingResult.circuitBreakerTriggered) {
+              // Stop the bot
+              this.listener.close();
+              process.exit(1);
+            }
+
+            if (compoundingResult.reinvested > 0) {
+              console.log(`💹 Compounding: Reinvested $${compoundingResult.reinvested.toFixed(2)} | Withdrawn $${compoundingResult.withdrawn.toFixed(2)}`);
+            }
+          }
         }
       } else {
         console.log(`   ⏳ Outside critical window. Wait for ${this.config.target_window_start}s-${this.config.target_window_end}s`);
@@ -341,12 +463,15 @@ export class BTC5MinBot {
 
     // ========== LOGGING ==========
     if (this.state.cycle % 20 === 0) {
+      const compoundingStats = this.compoundingManager.getDailyStats();
       console.log(`\n📊 Status (cycle ${this.state.cycle}):`);
       console.log(`   Mid price: $${snapshot.mid_price.toFixed(4)}`);
       console.log(`   Time in candle: ${seconds_in_candle.toFixed(1)}s`);
       console.log(`   Critical window: ${is_critical ? '✅ YES' : '❌ NO'}`);
       console.log(`   Active orders: ${active.length}`);
-      console.log(`   Profit so far: $${this.state.total_profit.toFixed(2)}`);
+      console.log(`   Profit (session): $${this.state.total_profit.toFixed(2)}`);
+      console.log(`   Capital (compounded): $${compoundingStats.capital.toFixed(2)}`);
+      console.log(`   Tier: ${compoundingStats.tier}`);
     }
 
     this.onCycle?.({
