@@ -1,36 +1,51 @@
 {
-  "name": "polymarket-btc-bot",
-  "version": "1.0.0",
-  "description": "BTC 5-minute automated market maker for Polymarket",
+  "name": "btc-5-min-bot",
+  "version": "2.0.0",
+  "description": "BTC 5-Minute Trading Bot with Daily Compounding",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "TS_NODE_PROJECT=tsconfig.json ts-node src/index.ts",
-    "demo": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/test-runner.ts",
-    "dashboard": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/dashboard-runner.ts",
     "build": "tsc",
+    "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
-    "test:demo": "TS_NODE_PROJECT=tsconfig.json NODE_ENV=demo ts-node src/test-runner.ts"
+    "demo": "NETWORK=demo npm run dev",
+    "mainnet": "NETWORK=mainnet npm run dev",
+    "clean": "rm -rf dist/ && rm -f compounding_state.json",
+    "test": "ts-node src/demo-runner.ts",
+    "dashboard": "ts-node src/dashboard-runner.ts",
+    "metrics": "ts-node -e \"const m = require('./dist/metrics'); console.log(new m.MetricsTracker().getReport())\"",
+    "report": "ts-node -e \"const cm = require('./dist/compounding-manager'); console.log(new cm.CompoundingManager().getReport())\"",
+    "analyze": "ts-node src/market-analyzer.ts",
+    "analyze-rest": "ts-node src/market-analyzer-rest.ts",
+    "mock-server": "node dist/mock-server.js",
+    "paper-trade": "npx tsx src/run-paper-trade.ts",
+    "backtest": "npx tsx src/backtest-runner.ts"
   },
   "keywords": [
-    "polymarket",
     "trading",
-    "market-maker",
-    "crypto"
+    "bot",
+    "crypto",
+    "polymarket",
+    "btc",
+    "compounding"
   ],
-  "author": "",
+  "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@polymarket/clob-client": "^0.5.0",
-    "@types/ws": "^8.5.0",
-    "axios": "^1.6.0",
-    "dotenv": "^16.3.1",
-    "ethers": "^6.7.0",
-    "ws": "^8.14.0"
+    "@polymarket/clob-client": "^2.0.0",
+    "axios": "^1.15.2",
+    "dotenv": "^16.0.0",
+    "ethers": "^6.0.0",
+    "node-fetch": "^2.7.0",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.8.0",
-    "typescript": "^5.2.2",
-    "ts-node": "^10.9.1",
-    "esbuild": "^0.19.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }

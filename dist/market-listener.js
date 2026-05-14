@@ -4,6 +4,9 @@ exports.MarketListener = void 0;
 const WebSocket = require('ws');
 class MarketListener {
     constructor(market_id, ws_url) {
+        this.bids = new Map();
+        this.asks = new Map();
+        this.reconnectAttempts = 0;
         this.snapshot = {
             best_bid: { price: 0, size: 0 },
             best_ask: { price: 0, size: 0 },
@@ -14,24 +17,38 @@ class MarketListener {
             sum_check: 1.0
         };
         this.market_id = market_id;
+        const demoMode = process.env.DEMO_MODE === 'true' || process.env.NETWORK === 'demo';
+        const backtestMode = process.env.BACKTEST_MODE === 'true';
+        if (demoMode && !backtestMode) {
+            console.log('🧪 Demo mode - skipping WebSocket connection');
+            return;
+        }
+        if (backtestMode) {
+            console.log('📊 Backtest mode - connecting to REAL WebSocket');
+        }
         this.ws = new WebSocket(ws_url);
         this.initializeConnection();
     }
     initializeConnection() {
         this.ws.on('open', () => {
             console.log('📡 WebSocket connected');
+            this.reconnectAttempts = 0;
             // Subscribe to order book updates for this market
             const subscribe_msg = {
-                action: 'subscribe',
-                channel: `book:${this.market_id}`,
+                type: 'market',
+                assets_ids: [this.market_id],
+                custom_feature_enabled: true
             };
             this.ws.send(JSON.stringify(subscribe_msg));
         });
         this.ws.on('message', (data) => {
             try {
-                const msg = JSON.parse(data.toString());
-                if (msg.channel === `book:${this.market_id}`) {
-                    this.updateSnapshot(msg.data);
+                const parsed = JSON.parse(data.toString());
+                const msgs = Array.isArray(parsed) ? parsed : [parsed];
+                for (const msg of msgs) {
+                    if (msg.asset_id === this.market_id || msg.market === this.market_id) {
+                        this.updateSnapshot(msg);
+                    }
                 }
             }
             catch (e) {
@@ -42,22 +59,46 @@ class MarketListener {
             console.error('WebSocket error:', err);
         });
         this.ws.on('close', () => {
-            console.log('📡 WebSocket disconnected. Reconnecting in 3s...');
-            setTimeout(() => this.reconnect(), 3000);
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            console.log(`📡 WebSocket disconnected. Reconnecting in ${delay / 1000}s...`);
+            this.reconnectAttempts++;
+            setTimeout(() => this.reconnect(), delay);
         });
     }
     updateSnapshot(data) {
-        // Parse order book from Polymarket format
-        const bids = data.bids || [];
-        const asks = data.asks || [];
-        const bestBid = bids[0] || { price: 0, size: 0 };
-        const bestAsk = asks[0] || { price: 0, size: 0 };
+        if (data.event_type !== 'book' && data.event_type !== 'price_change') {
+            return; // Ignore other events
+        }
+        const newBids = data.bids || [];
+        const newAsks = data.asks || [];
+        for (const b of newBids) {
+            const p = parseFloat(b.price);
+            const s = parseFloat(b.size);
+            if (s === 0)
+                this.bids.delete(p);
+            else
+                this.bids.set(p, s);
+        }
+        for (const a of newAsks) {
+            const p = parseFloat(a.price);
+            const s = parseFloat(a.size);
+            if (s === 0)
+                this.asks.delete(p);
+            else
+                this.asks.set(p, s);
+        }
+        const bidPrices = Array.from(this.bids.keys()).sort((a, b) => b - a);
+        const askPrices = Array.from(this.asks.keys()).sort((a, b) => a - b);
+        const bestBidPrice = bidPrices[0] || 0;
+        const bestAskPrice = askPrices[0] || 0;
+        const bestBid = { price: bestBidPrice, size: this.bids.get(bestBidPrice) || 0 };
+        const bestAsk = { price: bestAskPrice, size: this.asks.get(bestAskPrice) || 0 };
         const hasBook = bestBid.price > 0 && bestAsk.price > 0;
         this.snapshot = {
             best_bid: bestBid,
             best_ask: bestAsk,
-            all_bids: bids,
-            all_asks: asks,
+            all_bids: bidPrices.map((price) => ({ price, size: this.bids.get(price) })),
+            all_asks: askPrices.map((price) => ({ price, size: this.asks.get(price) })),
             mid_price: hasBook ? (bestBid.price + bestAsk.price) / 2 : this.snapshot.mid_price,
             timestamp: Date.now(),
             sum_check: bestBid.price > 0 ? bestBid.price + (1 - (bestAsk.price || 0.5)) : 1
@@ -71,11 +112,16 @@ class MarketListener {
         return this.snapshot;
     }
     reconnect() {
-        this.ws = new WebSocket(process.env.WS_URL);
+        this.bids.clear();
+        this.asks.clear();
+        const wsUrl = process.env.WS_URL || 'wss://ws.polymarket.com';
+        this.ws = new WebSocket(wsUrl);
         this.initializeConnection();
     }
     close() {
-        this.ws.close();
+        if (this.ws) {
+            this.ws.close();
+        }
     }
 }
 exports.MarketListener = MarketListener;

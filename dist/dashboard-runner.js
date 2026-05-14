@@ -11,10 +11,10 @@ dotenv_1.default.config();
 async function main() {
     process.env.DEMO_MODE = 'true';
     const metrics = new metrics_1.DashboardMetricsStore();
-    const bot = (0, demo_simulator_1.createDemoBot)(metrics);
     const port = Number(process.env.DASHBOARD_PORT || '3000');
     const durationMs = Number(process.env.DEMO_DURATION_MS || '86400000');
-    const server = (0, dashboard_server_1.startDashboardServer)(metrics, port);
+    const server = new dashboard_server_1.DashboardServer(port, metrics);
+    const bot = (0, demo_simulator_1.createDemoBot)(metrics);
     console.log(`🧪 Starting 24h-style BTC demo session for ${(durationMs / 3600000).toFixed(2)}h`);
     const runPromise = bot.runFor(durationMs).then(() => {
         console.log('✅ Demo session finished');

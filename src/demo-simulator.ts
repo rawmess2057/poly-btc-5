@@ -6,6 +6,7 @@ interface DemoTradeGroup {
   trade_id: string;
   created_at: number;
   expected_profit: number;
+  net_profit: number;  // After fees
   buy_order: ActiveOrder;
   sell_order: ActiveOrder;
 }
@@ -59,13 +60,16 @@ class DemoOrderPlacer implements OrderExecutor {
     const halfSpread = (spread_bps / 10000) / 2;
     const buy = this.createOrder('BUY', Math.max(0.01, mid_price - halfSpread), size);
     const sell = this.createOrder('SELL', Math.min(0.99, mid_price + halfSpread), size);
-    const expectedProfit = (spread_bps / 10000) * size * 2 * mid_price + (0.001 * size * 2 * mid_price);
+    const expectedProfit = (spread_bps / 10000) * size * 2 * mid_price;
+    const feeCost = (100 / 10000) * size * 2 * mid_price; // 1% fee per side
+    const netProfit = expectedProfit - feeCost;
     const tradeId = `pair:${buy.order_id}:${sell.order_id}`;
 
     this.tradeGroups.set(tradeId, {
       trade_id: tradeId,
       created_at: Date.now(),
       expected_profit: expectedProfit,
+      net_profit: netProfit,
       buy_order: buy,
       sell_order: sell
     });
@@ -155,17 +159,17 @@ class DemoOrderPlacer implements OrderExecutor {
 
       if (roll < 0.58) {
         outcome = 'WON';
-        realizedPnl = trade.expected_profit * (1.8 + Math.random() * 1.2);
+        realizedPnl = trade.net_profit * (0.8 + Math.random() * 0.4); // 80-120% of expected net profit
         buyStatus = 'FILLED';
         sellStatus = 'FILLED';
       } else if (roll < 0.82) {
         outcome = 'BREAKEVEN';
-        realizedPnl = trade.expected_profit * (Math.random() * 0.16 - 0.08);
+        realizedPnl = trade.net_profit * (Math.random() * 0.3 - 0.15); // Small loss/gain after fees
         buyStatus = Math.random() > 0.5 ? 'FILLED' : 'CANCELLED';
         sellStatus = buyStatus === 'FILLED' ? 'CANCELLED' : 'FILLED';
       } else {
         outcome = 'LOST';
-        realizedPnl = -trade.expected_profit * (0.55 + Math.random() * 0.9);
+        realizedPnl = -(Math.abs(trade.net_profit) * (0.5 + Math.random() * 0.8)); // Lost the spread, paid fees
         buyStatus = Math.random() > 0.4 ? 'FILLED' : 'CANCELLED';
         sellStatus = buyStatus === 'FILLED' ? 'CANCELLED' : 'FILLED';
       }

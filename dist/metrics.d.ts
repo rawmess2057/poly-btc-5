@@ -1,32 +1,105 @@
-import type { BotCycleReport } from './btc-bot';
-export interface DashboardTrade {
-    timestamp: number;
+import { BotCycleReport } from './btc-bot';
+export interface MetricsSnapshot {
     cycle: number;
-    mid_price: number;
-    risk_free_profit: number;
-    estimated_cycle_profit: number;
-    order_ids: string[];
-    trade_id: string;
-    status: 'OPEN' | 'WON' | 'LOST' | 'BREAKEVEN';
-    realized_pnl?: number;
-}
-export interface DashboardEvent {
     timestamp: number;
-    level: 'info' | 'trade' | 'fill' | 'cancel';
-    message: string;
-}
-export interface ProfitPoint {
-    timestamp: number;
+    capital: number;
+    daily_profit: number;
+    daily_profit_pct: number;
+    hourly_profit: number;
     total_profit: number;
-    cycle: number;
+    total_trades: number;
+    won_trades: number;
+    lost_trades: number;
+    breakeven_trades: number;
+    win_rate: number;
+    profit_factor: number;
+    avg_win: number;
+    avg_loss: number;
+    risk_reward_ratio: number;
+    expected_value: number;
+    max_drawdown: number;
+    max_drawdown_pct: number;
+    current_drawdown: number;
+    current_drawdown_pct: number;
+    fill_rate: number;
+    trades_per_hour: number;
+    runtime_ms: number;
+    tier: number;
+    scaling_multiplier: number;
+    next_tier_target: number;
+    tier_progress: number;
 }
-export interface OrderSettlement {
+export declare class MetricsTracker {
+    private startTime;
+    private peakCapital;
+    private snapshots;
+    private trades;
+    private hourlyProfits;
+    private dailyStats;
+    constructor();
+    recordTrade(profit: number, timestamp: number, size?: number): void;
+    recordOrderPlaced(count?: number): void;
+    recordFill(count?: number): void;
+    recordCancel(count?: number): void;
+    snapshot(capital: number, cycle: number, tier: number, scalingMultiplier: number, nextTierTarget: number, tierProgress: number): MetricsSnapshot;
+    getStats(): {
+        total_trades: number;
+        won_trades: number;
+        lost_trades: number;
+        breakeven_trades: number;
+        total_profit: number;
+        gross_profit: number;
+        gross_loss: number;
+        orders_placed: number;
+        fills: number;
+        cancels: number;
+    };
+    getSnapshots(): MetricsSnapshot[];
+    resetDaily(): void;
+    exportForDashboard(): {
+        snapshots: MetricsSnapshot[];
+        cycle: number;
+        timestamp: number;
+        capital: number;
+        daily_profit: number;
+        daily_profit_pct: number;
+        hourly_profit: number;
+        total_profit: number;
+        total_trades: number;
+        won_trades: number;
+        lost_trades: number;
+        breakeven_trades: number;
+        win_rate: number;
+        profit_factor: number;
+        avg_win: number;
+        avg_loss: number;
+        risk_reward_ratio: number;
+        expected_value: number;
+        max_drawdown: number;
+        max_drawdown_pct: number;
+        current_drawdown: number;
+        current_drawdown_pct: number;
+        fill_rate: number;
+        trades_per_hour: number;
+        runtime_ms: number;
+        tier: number;
+        scaling_multiplier: number;
+        next_tier_target: number;
+        tier_progress: number;
+        gross_profit: number;
+        gross_loss: number;
+        fills: number;
+        cancels: number;
+        orders_placed: number;
+    };
+    getReport(): string;
+}
+export interface SettlementRecord {
     order_id: string;
     side: 'BUY' | 'SELL';
     price: number;
     size: number;
     status: 'FILLED' | 'CANCELLED';
-    profit_delta?: number;
 }
 export interface TradeResolution {
     trade_id: string;
@@ -36,73 +109,22 @@ export interface TradeResolution {
     cancelled_orders: number;
 }
 export declare class DashboardMetricsStore {
-    private readonly startedAt;
-    private lastUpdatedAt;
     private cycles;
-    private edgeSignals;
-    private skippedSignals;
-    private tradesEntered;
-    private ordersPlaced;
-    private fills;
-    private cancels;
-    private replacements;
-    private totalProfit;
-    private realizedPnl;
-    private wonTrades;
-    private lostTrades;
-    private breakevenTrades;
-    private grossProfit;
-    private grossLoss;
-    private lastMidPrice;
-    private lastRiskFreeProfit;
-    private activeOrders;
-    private peakActiveOrders;
-    private criticalWindowCycles;
-    private recentTrades;
-    private recentEvents;
-    private profitSeries;
-    private readonly pendingTrades;
-    private readonly orderToTrade;
+    private trades;
+    private settlements;
+    private hourlyProfits;
     recordCycle(report: BotCycleReport): void;
-    recordSettlement(settlement: OrderSettlement): void;
-    recordTradeResolution(resolution: TradeResolution): void;
-    recordReplacement(oldOrderId: string, newOrderId: string): void;
-    getSnapshot(): {
-        started_at: number;
-        last_updated_at: number;
-        runtime_ms: number;
+    recordSettlement(settlement: SettlementRecord): void;
+    recordTradeResolution(trade: TradeResolution): void;
+    recordReplacement(oldId: string, newId: string): void;
+    getMetrics(): {
         cycles: number;
-        edge_signals: number;
-        skipped_signals: number;
-        trades_entered: number;
-        orders_placed: number;
-        fills: number;
-        cancels: number;
-        replacements: number;
-        total_profit: number;
-        realized_pnl: number;
-        expected_value_open: number;
+        trades: number;
         won_trades: number;
-        lost_trades: number;
-        breakeven_trades: number;
-        gross_profit: number;
-        gross_loss: number;
-        avg_win: number;
-        avg_loss: number;
-        profit_factor: number;
-        last_mid_price: number;
-        last_risk_free_profit: number;
-        active_orders: number;
-        peak_active_orders: number;
-        critical_window_cycles: number;
-        trades_per_hour: number;
-        profit_per_hour: number;
-        projected_day_profit: number;
-        fill_rate: number;
-        recent_trades: DashboardTrade[];
-        recent_events: DashboardEvent[];
-        profit_series: ProfitPoint[];
+        win_rate: number;
+        daily_profit: number;
+        hourly_profit: number;
+        capital: number;
     };
-    private pushEvent;
 }
 //# sourceMappingURL=metrics.d.ts.map

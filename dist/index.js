@@ -5,20 +5,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 const btc_bot_1 = require("./btc-bot");
-const test_runner_1 = require("./test-runner");
+const demo_runner_1 = require("./demo-runner");
 dotenv_1.default.config();
 async function main() {
     const isDemoMode = process.env.DEMO_MODE === 'true' ||
         process.env.NETWORK === 'demo' ||
         process.env.PRIVATE_KEY === 'your_demo_private_key_here';
     if (isDemoMode) {
-        await (0, test_runner_1.runDemo)();
+        await (0, demo_runner_1.runDemo)();
         return;
     }
     const marketId = process.env.MARKET_ID;
     const PRIVATE_KEY = process.env.PRIVATE_KEY;
-    if (!PRIVATE_KEY) {
-        console.error('PRIVATE_KEY not set in .env');
+    if (!PRIVATE_KEY || PRIVATE_KEY === 'your_demo_private_key_here') {
+        console.error('PRIVATE_KEY not set or still using demo placeholder in .env');
+        process.exit(1);
+    }
+    if (!/^0x[0-9a-fA-F]{64}$/.test(PRIVATE_KEY)) {
+        console.error('PRIVATE_KEY must be a valid 64-character hex string starting with 0x');
         process.exit(1);
     }
     if (!marketId) {
