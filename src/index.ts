@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { BTC5MinBot } from './btc-bot';
-import { runDemo } from './test-runner';
+import { runDemo } from './demo-runner';
 
 dotenv.config();
 
@@ -18,8 +18,13 @@ async function main() {
   const marketId = process.env.MARKET_ID;
   const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 
-  if (!PRIVATE_KEY) {
-    console.error('PRIVATE_KEY not set in .env');
+  if (!PRIVATE_KEY || PRIVATE_KEY === 'your_demo_private_key_here') {
+    console.error('PRIVATE_KEY not set or still using demo placeholder in .env');
+    process.exit(1);
+  }
+
+  if (!/^0x[0-9a-fA-F]{64}$/.test(PRIVATE_KEY)) {
+    console.error('PRIVATE_KEY must be a valid 64-character hex string starting with 0x');
     process.exit(1);
   }
 

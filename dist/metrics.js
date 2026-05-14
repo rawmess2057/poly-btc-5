@@ -1,193 +1,265 @@
 "use strict";
+// metrics-v2.ts
+// Comprehensive metrics tracking with daily compounding
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DashboardMetricsStore = void 0;
-class DashboardMetricsStore {
+exports.DashboardMetricsStore = exports.MetricsTracker = void 0;
+class MetricsTracker {
     constructor() {
-        this.startedAt = Date.now();
-        this.lastUpdatedAt = this.startedAt;
-        this.cycles = 0;
-        this.edgeSignals = 0;
-        this.skippedSignals = 0;
-        this.tradesEntered = 0;
-        this.ordersPlaced = 0;
-        this.fills = 0;
-        this.cancels = 0;
-        this.replacements = 0;
-        this.totalProfit = 0;
-        this.realizedPnl = 0;
-        this.wonTrades = 0;
-        this.lostTrades = 0;
-        this.breakevenTrades = 0;
-        this.grossProfit = 0;
-        this.grossLoss = 0;
-        this.lastMidPrice = 0;
-        this.lastRiskFreeProfit = 0;
-        this.activeOrders = 0;
-        this.peakActiveOrders = 0;
-        this.criticalWindowCycles = 0;
-        this.recentTrades = [];
-        this.recentEvents = [];
-        this.profitSeries = [];
-        this.pendingTrades = new Map();
-        this.orderToTrade = new Map();
+        this.startTime = Date.now();
+        this.peakCapital = 500;
+        this.snapshots = [];
+        // Trade history
+        this.trades = [];
+        // Hourly profit tracking
+        this.hourlyProfits = new Map();
+        // Daily tracking
+        this.dailyStats = {
+            total_trades: 0,
+            won_trades: 0,
+            lost_trades: 0,
+            breakeven_trades: 0,
+            gross_profit: 0,
+            gross_loss: 0,
+            fills: 0,
+            cancels: 0,
+            orders_placed: 0
+        };
+        console.log('Metrics tracker initialized');
     }
-    recordCycle(report) {
-        this.lastUpdatedAt = report.timestamp;
-        this.cycles = report.cycle + 1;
-        this.totalProfit = report.total_profit;
-        this.lastMidPrice = report.mid_price;
-        this.lastRiskFreeProfit = report.risk_free_profit;
-        this.activeOrders = report.active_orders;
-        this.peakActiveOrders = Math.max(this.peakActiveOrders, report.active_orders);
-        if (report.in_critical_window) {
-            this.criticalWindowCycles++;
+    recordTrade(profit, timestamp, size = 1) {
+        this.trades.push({ profit, timestamp, size });
+        const epsilon = 0.001;
+        if (Math.abs(profit) < epsilon) {
+            this.dailyStats.breakeven_trades++;
         }
-        if (report.edge_detected) {
-            this.edgeSignals++;
-            this.pushEvent('info', `Edge signal at ${report.seconds_in_candle.toFixed(1)}s with $${report.risk_free_profit.toFixed(4)} spread`);
-        }
-        if (report.edge_detected && !report.entered_trade) {
-            this.skippedSignals++;
-        }
-        if (report.entered_trade) {
-            this.tradesEntered++;
-            this.ordersPlaced += report.order_ids.length;
-            const tradeId = `pair:${report.order_ids.join(':')}`;
-            const trade = {
-                timestamp: report.timestamp,
-                cycle: report.cycle,
-                mid_price: report.mid_price,
-                risk_free_profit: report.risk_free_profit,
-                estimated_cycle_profit: report.estimated_cycle_profit,
-                order_ids: report.order_ids,
-                trade_id: tradeId,
-                status: 'OPEN'
-            };
-            this.pendingTrades.set(tradeId, {
-                trade_id: tradeId,
-                timestamp: report.timestamp,
-                cycle: report.cycle,
-                mid_price: report.mid_price,
-                risk_free_profit: report.risk_free_profit,
-                estimated_cycle_profit: report.estimated_cycle_profit,
-                order_ids: report.order_ids
-            });
-            for (const orderId of report.order_ids) {
-                this.orderToTrade.set(orderId, tradeId);
-            }
-            this.recentTrades.unshift({
-                ...trade
-            });
-            this.recentTrades = this.recentTrades.slice(0, 20);
-            this.pushEvent('trade', `Entered paired trade at $${report.mid_price.toFixed(4)} for est. $${report.estimated_cycle_profit.toFixed(4)}`);
-        }
-        this.profitSeries.push({
-            timestamp: report.timestamp,
-            total_profit: report.total_profit,
-            cycle: report.cycle
-        });
-        this.profitSeries = this.profitSeries.slice(-120);
-    }
-    recordSettlement(settlement) {
-        this.lastUpdatedAt = Date.now();
-        if (settlement.status === 'FILLED') {
-            this.fills++;
-            this.pushEvent('fill', `Order ${settlement.order_id} filled ${settlement.side} ${settlement.size} @ $${settlement.price.toFixed(4)}`);
+        else if (profit > 0) {
+            this.dailyStats.won_trades++;
+            this.dailyStats.gross_profit += profit;
         }
         else {
-            this.cancels++;
-            this.pushEvent('cancel', `Order ${settlement.order_id} cancelled ${settlement.side} ${settlement.size} @ $${settlement.price.toFixed(4)}`);
+            this.dailyStats.lost_trades++;
+            this.dailyStats.gross_loss += Math.abs(profit);
         }
+        this.dailyStats.total_trades++;
+        // Track hourly profit
+        const date = new Date(timestamp);
+        const hourKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${String(date.getHours()).padStart(2, '0')}`;
+        const currentHourly = this.hourlyProfits.get(hourKey) || 0;
+        this.hourlyProfits.set(hourKey, currentHourly + profit);
     }
-    recordTradeResolution(resolution) {
-        this.lastUpdatedAt = Date.now();
-        this.realizedPnl += resolution.realized_pnl;
-        if (resolution.realized_pnl > 0) {
-            this.grossProfit += resolution.realized_pnl;
-        }
-        else if (resolution.realized_pnl < 0) {
-            this.grossLoss += Math.abs(resolution.realized_pnl);
-        }
-        if (resolution.status === 'WON') {
-            this.wonTrades++;
-        }
-        else if (resolution.status === 'LOST') {
-            this.lostTrades++;
-        }
-        else {
-            this.breakevenTrades++;
-        }
-        const pending = this.pendingTrades.get(resolution.trade_id);
-        if (pending) {
-            this.pendingTrades.delete(resolution.trade_id);
-            for (const orderId of pending.order_ids) {
-                this.orderToTrade.delete(orderId);
-            }
-        }
-        this.recentTrades = this.recentTrades.map((trade) => trade.trade_id === resolution.trade_id
-            ? { ...trade, status: resolution.status, realized_pnl: Number(resolution.realized_pnl.toFixed(4)) }
-            : trade);
-        this.pushEvent(resolution.status === 'LOST' ? 'cancel' : 'fill', `Trade ${resolution.trade_id} ${resolution.status.toLowerCase()} at ${resolution.realized_pnl >= 0 ? '+' : ''}$${resolution.realized_pnl.toFixed(4)}`);
+    recordOrderPlaced(count = 1) {
+        this.dailyStats.orders_placed += count;
     }
-    recordReplacement(oldOrderId, newOrderId) {
-        this.lastUpdatedAt = Date.now();
-        this.replacements++;
-        this.pushEvent('info', `Replaced order ${oldOrderId} with ${newOrderId}`);
+    recordFill(count = 1) {
+        this.dailyStats.fills += count;
     }
-    getSnapshot() {
-        const runtimeMs = this.lastUpdatedAt - this.startedAt;
-        const runtimeHours = runtimeMs / 3600000;
-        const tradesPerHour = runtimeHours > 0 ? this.tradesEntered / runtimeHours : 0;
-        const profitPerHour = runtimeHours > 0 ? this.totalProfit / runtimeHours : 0;
-        const projectedDayProfit = profitPerHour * 24;
-        const openExpectedValue = Array.from(this.pendingTrades.values()).reduce((sum, trade) => sum + trade.estimated_cycle_profit, 0);
-        const avgWin = this.wonTrades > 0 ? this.grossProfit / this.wonTrades : 0;
-        const avgLoss = this.lostTrades > 0 ? this.grossLoss / this.lostTrades : 0;
-        const profitFactor = this.grossLoss > 0 ? this.grossProfit / this.grossLoss : (this.grossProfit > 0 ? this.grossProfit : 0);
+    recordCancel(count = 1) {
+        this.dailyStats.cancels += count;
+    }
+    snapshot(capital, cycle, tier, scalingMultiplier, nextTierTarget, tierProgress) {
+        if (capital > this.peakCapital) {
+            this.peakCapital = capital;
+        }
+        const runtime = Date.now() - this.startTime;
+        const totalProfit = this.trades.reduce((sum, t) => sum + t.profit, 0);
+        const winRate = this.dailyStats.total_trades > 0
+            ? (this.dailyStats.won_trades / this.dailyStats.total_trades) * 100
+            : 0;
+        const avgWin = this.dailyStats.won_trades > 0
+            ? this.dailyStats.gross_profit / this.dailyStats.won_trades
+            : 0;
+        const avgLoss = this.dailyStats.lost_trades > 0
+            ? this.dailyStats.gross_loss / this.dailyStats.lost_trades
+            : 0;
+        const profitFactor = this.dailyStats.gross_loss > 0
+            ? this.dailyStats.gross_profit / this.dailyStats.gross_loss
+            : (this.dailyStats.gross_profit > 0 ? 999 : 0);
+        const riskRewardRatio = avgLoss > 0 ? avgWin / avgLoss : 0;
+        let maxDD = 0;
+        let maxDDPct = 0;
+        let currentDD = 0;
+        let currentDDPct = 0;
+        if (this.peakCapital > 0) {
+            currentDD = Math.max(0, this.peakCapital - capital);
+            currentDDPct = (currentDD / this.peakCapital) * 100;
+            maxDD = currentDD;
+            maxDDPct = currentDDPct;
+        }
+        const tradesPerHour = runtime > 0 ? (this.dailyStats.total_trades / runtime) * (1000 * 60 * 60) : 0;
+        const fillRate = this.dailyStats.orders_placed > 0
+            ? (this.dailyStats.fills / this.dailyStats.orders_placed) * 100
+            : 0;
+        const expectedValue = this.dailyStats.total_trades > 0
+            ? totalProfit / this.dailyStats.total_trades
+            : 0;
+        const now = new Date();
+        const currentHourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}`;
+        const hourlyProfit = this.hourlyProfits.get(currentHourKey) || 0;
+        const snap = {
+            cycle,
+            timestamp: Date.now(),
+            capital,
+            daily_profit: totalProfit,
+            daily_profit_pct: (totalProfit / 500) * 100,
+            hourly_profit: hourlyProfit,
+            total_profit: totalProfit,
+            total_trades: this.dailyStats.total_trades,
+            won_trades: this.dailyStats.won_trades,
+            lost_trades: this.dailyStats.lost_trades,
+            breakeven_trades: this.dailyStats.breakeven_trades,
+            win_rate: winRate,
+            profit_factor: profitFactor,
+            avg_win: avgWin,
+            avg_loss: avgLoss,
+            risk_reward_ratio: riskRewardRatio,
+            expected_value: expectedValue,
+            max_drawdown: maxDD,
+            max_drawdown_pct: maxDDPct,
+            current_drawdown: currentDD,
+            current_drawdown_pct: currentDDPct,
+            fill_rate: fillRate,
+            trades_per_hour: tradesPerHour,
+            runtime_ms: runtime,
+            tier,
+            scaling_multiplier: scalingMultiplier,
+            next_tier_target: nextTierTarget,
+            tier_progress: tierProgress
+        };
+        this.snapshots.push(snap);
+        return snap;
+    }
+    getStats() {
+        const totalProfit = this.trades.reduce((sum, t) => sum + t.profit, 0);
         return {
-            started_at: this.startedAt,
-            last_updated_at: this.lastUpdatedAt,
-            runtime_ms: runtimeMs,
-            cycles: this.cycles,
-            edge_signals: this.edgeSignals,
-            skipped_signals: this.skippedSignals,
-            trades_entered: this.tradesEntered,
-            orders_placed: this.ordersPlaced,
-            fills: this.fills,
-            cancels: this.cancels,
-            replacements: this.replacements,
-            total_profit: Number(this.totalProfit.toFixed(4)),
-            realized_pnl: Number(this.realizedPnl.toFixed(4)),
-            expected_value_open: Number(openExpectedValue.toFixed(4)),
-            won_trades: this.wonTrades,
-            lost_trades: this.lostTrades,
-            breakeven_trades: this.breakevenTrades,
-            gross_profit: Number(this.grossProfit.toFixed(4)),
-            gross_loss: Number(this.grossLoss.toFixed(4)),
-            avg_win: Number(avgWin.toFixed(4)),
-            avg_loss: Number(avgLoss.toFixed(4)),
-            profit_factor: Number(profitFactor.toFixed(4)),
-            last_mid_price: Number(this.lastMidPrice.toFixed(4)),
-            last_risk_free_profit: Number(this.lastRiskFreeProfit.toFixed(4)),
-            active_orders: this.activeOrders,
-            peak_active_orders: this.peakActiveOrders,
-            critical_window_cycles: this.criticalWindowCycles,
-            trades_per_hour: Number(tradesPerHour.toFixed(2)),
-            profit_per_hour: Number(profitPerHour.toFixed(4)),
-            projected_day_profit: Number(projectedDayProfit.toFixed(4)),
-            fill_rate: this.ordersPlaced > 0 ? Number(((this.fills / this.ordersPlaced) * 100).toFixed(1)) : 0,
-            recent_trades: this.recentTrades,
-            recent_events: this.recentEvents,
-            profit_series: this.profitSeries
+            total_trades: this.dailyStats.total_trades,
+            won_trades: this.dailyStats.won_trades,
+            lost_trades: this.dailyStats.lost_trades,
+            breakeven_trades: this.dailyStats.breakeven_trades,
+            total_profit: totalProfit,
+            gross_profit: this.dailyStats.gross_profit,
+            gross_loss: this.dailyStats.gross_loss,
+            orders_placed: this.dailyStats.orders_placed,
+            fills: this.dailyStats.fills,
+            cancels: this.dailyStats.cancels
         };
     }
-    pushEvent(level, message) {
-        this.recentEvents.unshift({
-            timestamp: Date.now(),
-            level,
-            message
-        });
-        this.recentEvents = this.recentEvents.slice(0, 30);
+    getSnapshots() {
+        return [...this.snapshots];
+    }
+    resetDaily() {
+        this.dailyStats = {
+            total_trades: 0,
+            won_trades: 0,
+            lost_trades: 0,
+            breakeven_trades: 0,
+            gross_profit: 0,
+            gross_loss: 0,
+            fills: 0,
+            cancels: 0,
+            orders_placed: 0
+        };
+        console.log('Daily stats reset');
+    }
+    exportForDashboard() {
+        const latest = this.snapshots[this.snapshots.length - 1];
+        return {
+            ...this.dailyStats,
+            ...latest,
+            snapshots: this.snapshots.slice(-100)
+        };
+    }
+    getReport() {
+        const stats = this.getStats();
+        const totalProfit = stats.total_profit;
+        const runtime = Date.now() - this.startTime;
+        const hours = runtime / (1000 * 60 * 60);
+        const hourlyRate = totalProfit / hours;
+        const winRate = stats.total_trades > 0
+            ? ((stats.won_trades / stats.total_trades) * 100).toFixed(1)
+            : '0.0';
+        const profitFactor = stats.gross_loss > 0
+            ? (stats.gross_profit / stats.gross_loss).toFixed(2)
+            : (stats.gross_profit > 0 ? 'inf' : '0.0');
+        const now = new Date();
+        const currentHourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}`;
+        const currentHourlyProfit = this.hourlyProfits.get(currentHourKey) || 0;
+        return `
+========== SESSION METRICS REPORT ==========
+
+TRADE STATISTICS:
+  Total Trades:      ${stats.total_trades}
+  Won Trades:        ${stats.won_trades} (${winRate}%)
+  Lost Trades:       ${stats.lost_trades}
+  Breakeven:         ${stats.breakeven_trades}
+
+PROFITABILITY:
+  Total Profit:      $${totalProfit.toFixed(2)}
+  Gross Win:         $${stats.gross_profit.toFixed(2)}
+  Gross Loss:        $${stats.gross_loss.toFixed(2)}
+  Profit Factor:     ${profitFactor}x
+
+EXECUTION:
+  Orders Placed:     ${stats.orders_placed}
+  Fills:             ${stats.fills}
+  Cancels:           ${stats.cancels}
+  Fill Rate:         ${stats.orders_placed > 0 ? ((stats.fills / stats.orders_placed) * 100).toFixed(1) : 0}%
+
+PERFORMANCE:
+  Runtime:           ${hours.toFixed(2)} hours
+  Hourly Rate:       $${hourlyRate.toFixed(2)}
+  Current Hour:      $${currentHourlyProfit.toFixed(2)}
+  Projected 24h:     $${(hourlyRate * 24).toFixed(2)}
+
+================================================
+    `;
+    }
+}
+exports.MetricsTracker = MetricsTracker;
+class DashboardMetricsStore {
+    constructor() {
+        this.cycles = [];
+        this.trades = [];
+        this.settlements = [];
+        this.hourlyProfits = new Map();
+    }
+    recordCycle(report) {
+        this.cycles.push(report);
+    }
+    recordSettlement(settlement) {
+        this.settlements.push(settlement);
+    }
+    recordTradeResolution(trade) {
+        this.trades.push(trade);
+        console.log(`Trade ${trade.status}: +$${trade.realized_pnl.toFixed(2)}`);
+        // Track hourly profit
+        const now = new Date();
+        const hourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}`;
+        const currentHourly = this.hourlyProfits.get(hourKey) || 0;
+        this.hourlyProfits.set(hourKey, currentHourly + trade.realized_pnl);
+    }
+    recordReplacement(oldId, newId) {
+        console.log(`Replaced ${oldId} with ${newId}`);
+    }
+    getMetrics() {
+        const totalTrades = this.trades.length;
+        const wonTrades = this.trades.filter(t => t.status === 'WON').length;
+        const dailyProfit = this.trades.reduce((sum, t) => sum + t.realized_pnl, 0);
+        const lastCycle = this.cycles[this.cycles.length - 1];
+        const capital = lastCycle?.capital || 500;
+        const cycle = lastCycle?.cycle || 0;
+        // Calculate current hourly profit
+        const now = new Date();
+        const currentHourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}`;
+        const hourlyProfit = this.hourlyProfits.get(currentHourKey) || 0;
+        return {
+            cycles: cycle,
+            trades: totalTrades,
+            won_trades: wonTrades,
+            win_rate: totalTrades > 0 ? (wonTrades / totalTrades) * 100 : 0,
+            daily_profit: dailyProfit,
+            hourly_profit: hourlyProfit,
+            capital: capital
+        };
     }
 }
 exports.DashboardMetricsStore = DashboardMetricsStore;

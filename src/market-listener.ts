@@ -22,6 +22,18 @@ export class MarketListener implements MarketDataSource {
 
   constructor(market_id: string, ws_url: string) {
     this.market_id = market_id;
+    const demoMode = process.env.DEMO_MODE === 'true' || process.env.NETWORK === 'demo';
+    const backtestMode = process.env.BACKTEST_MODE === 'true';
+    
+    if (demoMode && !backtestMode) {
+      console.log('🧪 Demo mode - skipping WebSocket connection');
+      return;
+    }
+    
+    if (backtestMode) {
+      console.log('📊 Backtest mode - connecting to REAL WebSocket');
+    }
+    
     this.ws = new WebSocket(ws_url);
     this.initializeConnection();
   }
@@ -124,11 +136,14 @@ export class MarketListener implements MarketDataSource {
   reconnect() {
     this.bids.clear();
     this.asks.clear();
-    this.ws = new WebSocket(process.env.WS_URL!);
+    const wsUrl = process.env.WS_URL || 'wss://ws.polymarket.com';
+    this.ws = new WebSocket(wsUrl);
     this.initializeConnection();
   }
 
   close() {
-    this.ws.close();
+    if (this.ws) {
+      this.ws.close();
+    }
   }
 }

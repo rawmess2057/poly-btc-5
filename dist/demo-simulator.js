@@ -49,12 +49,15 @@ class DemoOrderPlacer {
         const halfSpread = (spread_bps / 10000) / 2;
         const buy = this.createOrder('BUY', Math.max(0.01, mid_price - halfSpread), size);
         const sell = this.createOrder('SELL', Math.min(0.99, mid_price + halfSpread), size);
-        const expectedProfit = (spread_bps / 10000) * size * 2 * mid_price + (0.001 * size * 2 * mid_price);
+        const expectedProfit = (spread_bps / 10000) * size * 2 * mid_price;
+        const feeCost = (100 / 10000) * size * 2 * mid_price; // 1% fee per side
+        const netProfit = expectedProfit - feeCost;
         const tradeId = `pair:${buy.order_id}:${sell.order_id}`;
         this.tradeGroups.set(tradeId, {
             trade_id: tradeId,
             created_at: Date.now(),
             expected_profit: expectedProfit,
+            net_profit: netProfit,
             buy_order: buy,
             sell_order: sell
         });
@@ -79,6 +82,23 @@ class DemoOrderPlacer {
         const replacement = this.createOrder(existing.side, new_price, new_size);
         this.metrics.recordReplacement(order_id, replacement.order_id);
         console.log(`♻️ Replaced ${order_id} -> ${replacement.order_id}`);
+        return true;
+    }
+    async cancelOrder(order_id) {
+        this.settleExpiredTrades();
+        const existing = this.activeOrders.get(order_id);
+        if (!existing) {
+            return false;
+        }
+        this.activeOrders.delete(order_id);
+        this.metrics.recordSettlement({
+            order_id: existing.order_id,
+            side: existing.side,
+            price: existing.price,
+            size: existing.size,
+            status: 'CANCELLED'
+        });
+        console.log(`✅ Demo cancelled order: ${order_id}`);
         return true;
     }
     getActiveOrders() {
@@ -111,19 +131,19 @@ class DemoOrderPlacer {
             let sellStatus;
             if (roll < 0.58) {
                 outcome = 'WON';
-                realizedPnl = trade.expected_profit * (0.75 + Math.random() * 0.55);
+                realizedPnl = trade.net_profit * (0.8 + Math.random() * 0.4); // 80-120% of expected net profit
                 buyStatus = 'FILLED';
                 sellStatus = 'FILLED';
             }
             else if (roll < 0.82) {
                 outcome = 'BREAKEVEN';
-                realizedPnl = trade.expected_profit * (Math.random() * 0.16 - 0.08);
+                realizedPnl = trade.net_profit * (Math.random() * 0.3 - 0.15); // Small loss/gain after fees
                 buyStatus = Math.random() > 0.5 ? 'FILLED' : 'CANCELLED';
                 sellStatus = buyStatus === 'FILLED' ? 'CANCELLED' : 'FILLED';
             }
             else {
                 outcome = 'LOST';
-                realizedPnl = -trade.expected_profit * (0.55 + Math.random() * 0.9);
+                realizedPnl = -(Math.abs(trade.net_profit) * (0.5 + Math.random() * 0.8)); // Lost the spread, paid fees
                 buyStatus = Math.random() > 0.4 ? 'FILLED' : 'CANCELLED';
                 sellStatus = buyStatus === 'FILLED' ? 'CANCELLED' : 'FILLED';
             }
@@ -159,7 +179,7 @@ function createDemoBot(metrics) {
         listener: new DemoMarketListener(),
         placer: new DemoOrderPlacer(metrics),
         secondsIntoCandle: (() => {
-            const sequence = [12, 28, 34, 41, 48, 55, 18, 31, 38, 44, 52, 16];
+            const sequence = [230, 245, 256, 265, 275, 285, 290, 296, 5, 45, 120, 180];
             let index = 0;
             return () => {
                 const value = sequence[index % sequence.length];

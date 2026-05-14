@@ -1,3 +1,5 @@
+import { OrderExecutor } from './order-placer';
+export { ActiveOrder, OrderExecutor } from './order-placer';
 export interface BotCycleReport {
     cycle: number;
     timestamp: number;
@@ -7,6 +9,8 @@ export interface BotCycleReport {
     active_orders: number;
     in_critical_window: boolean;
     total_profit: number;
+    capital: number;
+    circuit_breaker_active: boolean;
     edge_detected: boolean;
     risk_free_profit: number;
     entered_trade: boolean;
@@ -41,49 +45,27 @@ export interface MarketDataSource {
     getSnapshot(): MarketSnapshot;
     close(): void;
 }
-export interface ActiveOrder {
-    order_id: string;
-    side: 'BUY' | 'SELL';
-    price: number;
-    size: number;
-    timestamp: number;
-    status: 'PENDING' | 'FILLED' | 'CANCELLED';
-}
-export interface OrderExecutor {
-    placeBothSides(mid_price: number, spread_bps: number, size: number): Promise<{
-        buy_order_id?: string;
-        sell_order_id?: string;
-    }>;
-    cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
-    getActiveOrders(): ActiveOrder[];
-}
-interface BotDependencies {
+export interface BotDependencies {
     listener?: MarketDataSource;
     placer?: OrderExecutor;
     secondsIntoCandle?: () => number;
     onCycle?: (report: BotCycleReport) => void;
+    onEvent?: (level: 'info' | 'trade' | 'fill' | 'cancel' | 'warn', message: string) => void;
 }
 export declare class BTC5MinBot {
     private listener;
     private placer;
-    private secondsIntoCandleProvider?;
-    private onCycle?;
+    private options;
     private state;
+    private compoundingManager;
+    private circuitBreaker;
+    private lastDailyResetTime;
     private config;
-    private selectTradeParameters;
     constructor(market_id: string, private_key: string, deps?: BotDependencies);
-    /**
-     * Calculate seconds into current 5-minute candle
-     * Assumes candles close at :00, :05, :10, etc.
-     */
     private getSecondsIntoCandle;
-    /**
-     * Main loop: Check for edges and execute
-     */
-    start(): Promise<void>;
-    runFor(duration_ms: number): Promise<void>;
     private cycle;
     private enterTrade;
+    start(): Promise<void>;
+    runFor(duration_ms: number): Promise<void>;
 }
-export {};
 //# sourceMappingURL=btc-bot.d.ts.map

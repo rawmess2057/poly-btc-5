@@ -26,10 +26,8 @@ class OrderPlacer {
         }
     }
     resolveChainId(raw) {
-        if (raw === '80002') {
-            return clob_client_1.Chain.AMOY;
-        }
-        return clob_client_1.Chain.POLYGON;
+        const chainId = parseInt(raw || '137', 10);
+        return chainId;
     }
     async getClient() {
         if (this.demoMode) {
@@ -83,17 +81,16 @@ class OrderPlacer {
                 throw new Error('Live client is unavailable.');
             }
             const tickSize = (process.env.TICK_SIZE || '0.01');
-            const order = await client.createAndPostOrder({
+            const userOrder = {
                 tokenID: this.liveConfig.tokenId,
                 price,
                 side: side === 'BUY' ? clob_client_1.Side.BUY : clob_client_1.Side.SELL,
                 size,
-                feeRateBps: 0,
+                feeRateBps: parseInt(process.env.FEE_RATE_BPS || '0', 10),
                 expiration: Math.floor(Date.now() / 1000) + timeout_seconds
-            }, {
-                tickSize,
-                negRisk: process.env.NEG_RISK === 'true'
-            }, clob_client_1.OrderType.GTD);
+            };
+            const signedOrder = await client.createOrder(userOrder, tickSize);
+            const order = await client.postOrder(signedOrder, clob_client_1.OrderType.GTD);
             const orderId = order?.orderID || order?.id || order?.orderId;
             if (!orderId) {
                 console.error('Order rejected:', order);
@@ -134,6 +131,28 @@ class OrderPlacer {
         }
         catch (err) {
             console.error('Cancel/replace failed:', err);
+            return false;
+        }
+    }
+    async cancelOrder(order_id) {
+        try {
+            const existing = this.active_orders.get(order_id);
+            if (!existing) {
+                return false;
+            }
+            if (this.demoMode) {
+                this.active_orders.delete(order_id);
+            }
+            else {
+                const client = await this.getClient();
+                await client?.cancelOrder({ orderID: order_id });
+                this.active_orders.delete(order_id);
+            }
+            console.log(`✅ Cancelled order: ${order_id}`);
+            return true;
+        }
+        catch (err) {
+            console.error(`Failed to cancel order ${order_id}:`, err);
             return false;
         }
     }

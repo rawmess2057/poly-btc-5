@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { createDemoBot } from './demo-simulator';
-import { startDashboardServer } from './dashboard-server';
+import { DashboardServer } from './dashboard-server';
 import { DashboardMetricsStore } from './metrics';
 
 dotenv.config();
@@ -9,10 +9,11 @@ async function main() {
   process.env.DEMO_MODE = 'true';
 
   const metrics = new DashboardMetricsStore();
-  const bot = createDemoBot(metrics);
   const port = Number(process.env.DASHBOARD_PORT || '3000');
   const durationMs = Number(process.env.DEMO_DURATION_MS || '86400000');
-  const server = startDashboardServer(metrics, port);
+  const server = new DashboardServer(port, metrics);
+
+  const bot = createDemoBot(metrics);
 
   console.log(`🧪 Starting 24h-style BTC demo session for ${(durationMs / 3_600_000).toFixed(2)}h`);
 

@@ -1,6 +1,21 @@
 import { ApiKeyCreds, Chain, ClobClient, OrderType, Side, TickSize } from '@polymarket/clob-client';
 import { ethers } from 'ethers';
-import { ActiveOrder, OrderExecutor } from './btc-bot';
+
+export interface ActiveOrder {
+  order_id: string;
+  side: 'BUY' | 'SELL';
+  price: number;
+  size: number;
+  timestamp: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELLED';
+}
+
+export interface OrderExecutor {
+  placeBothSides(mid_price: number, spread_bps: number, size: number): Promise<{ buy_order_id?: string; sell_order_id?: string }>;
+  cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
+  cancelOrder(order_id: string): Promise<boolean>;
+  getActiveOrders(): ActiveOrder[];
+}
 
 type OrderSide = 'BUY' | 'SELL';
 
@@ -43,10 +58,8 @@ export class OrderPlacer implements OrderExecutor {
   }
 
   private resolveChainId(raw?: string): Chain {
-    if (raw === '80002') {
-      return Chain.AMOY;
-    }
-    return Chain.POLYGON;
+    const chainId = parseInt(raw || '137', 10);
+    return chainId as Chain;
   }
 
   private async getClient(): Promise<ClobClient | undefined> {
@@ -125,21 +138,17 @@ export class OrderPlacer implements OrderExecutor {
       }
 
       const tickSize = (process.env.TICK_SIZE || '0.01') as TickSize;
-      const order = await client.createAndPostOrder(
-        {
-          tokenID: this.liveConfig.tokenId,
-          price,
-          side: side === 'BUY' ? Side.BUY : Side.SELL,
-          size,
-          feeRateBps: parseInt(process.env.FEE_RATE_BPS || '0', 10),
-          expiration: Math.floor(Date.now() / 1000) + timeout_seconds
-        },
-        {
-          tickSize,
-          negRisk: process.env.NEG_RISK === 'true'
-        },
-        OrderType.GTD
-      );
+      const userOrder = {
+        tokenID: this.liveConfig.tokenId,
+        price,
+        side: side === 'BUY' ? Side.BUY : Side.SELL,
+        size,
+        feeRateBps: parseInt(process.env.FEE_RATE_BPS || '0', 10),
+        expiration: Math.floor(Date.now() / 1000) + timeout_seconds
+      };
+
+      const signedOrder = await client.createOrder(userOrder, tickSize);
+      const order = await client.postOrder(signedOrder, OrderType.GTD);
 
       const orderId = order?.orderID || order?.id || order?.orderId;
       if (!orderId) {

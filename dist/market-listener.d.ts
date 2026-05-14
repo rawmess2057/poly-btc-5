@@ -2,6 +2,9 @@ import type { MarketDataSource, MarketSnapshot } from './btc-bot';
 export declare class MarketListener implements MarketDataSource {
     private ws;
     private market_id;
+    private bids;
+    private asks;
+    private reconnectAttempts;
     private snapshot;
     constructor(market_id: string, ws_url: string);
     private initializeConnection;

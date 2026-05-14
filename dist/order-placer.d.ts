@@ -1,4 +1,20 @@
-import { ActiveOrder, OrderExecutor } from './btc-bot';
+export interface ActiveOrder {
+    order_id: string;
+    side: 'BUY' | 'SELL';
+    price: number;
+    size: number;
+    timestamp: number;
+    status: 'PENDING' | 'FILLED' | 'CANCELLED';
+}
+export interface OrderExecutor {
+    placeBothSides(mid_price: number, spread_bps: number, size: number): Promise<{
+        buy_order_id?: string;
+        sell_order_id?: string;
+    }>;
+    cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
+    cancelOrder(order_id: string): Promise<boolean>;
+    getActiveOrders(): ActiveOrder[];
+}
 type OrderSide = 'BUY' | 'SELL';
 export declare class OrderPlacer implements OrderExecutor {
     private market_id;
@@ -15,6 +31,7 @@ export declare class OrderPlacer implements OrderExecutor {
     private trackOrder;
     placeOrder(side: OrderSide, price: number, size: number, timeout_seconds?: number): Promise<string | null>;
     cancelAndReplace(order_id: string, new_price: number, new_size: number): Promise<boolean>;
+    cancelOrder(order_id: string): Promise<boolean>;
     placeBothSides(mid_price: number, spread_bps: number, size: number): Promise<{
         buy_order_id?: string;
         sell_order_id?: string;
